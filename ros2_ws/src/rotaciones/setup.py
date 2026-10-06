@@ -22,9 +22,9 @@ setup(
             'pytest',
         ],
     },
-entry_points={
-    'console_scripts': [
-        'rotaciones = rotaciones.rotaciones:main',
-    ],
-},
+    entry_points={
+        'console_scripts': [
+            'rotaciones = rotaciones.rotaciones:main',
+        ],
+    },
 )
