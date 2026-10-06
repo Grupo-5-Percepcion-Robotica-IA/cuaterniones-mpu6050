@@ -1,0 +1,42 @@
+# ====================================
+# ROS 2 / colcon
+# ====================================
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# ====================================
+# ESP-IDF
+# ====================================
+micro_ros_ws/build/
+micro_ros_ws/main/build/
+
+# ====================================
+# micro-ROS generated workspaces
+# ====================================
+micro_ros_ws/components/micro_ros_espidf_component/micro_ros_dev/build/
+micro_ros_ws/components/micro_ros_espidf_component/micro_ros_dev/install/
+micro_ros_ws/components/micro_ros_espidf_component/micro_ros_dev/log/
+
+micro_ros_ws/components/micro_ros_espidf_component/micro_ros_src/build/
+micro_ros_ws/components/micro_ros_espidf_component/micro_ros_src/install/
+micro_ros_ws/components/micro_ros_espidf_component/micro_ros_src/log/
+
+# ====================================
+# Python
+# ====================================
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ====================================
+# IDE
+# ====================================
+.vscode/
+.idea/
+
+# ====================================
+# OS
+# ====================================
+.DS_Store
