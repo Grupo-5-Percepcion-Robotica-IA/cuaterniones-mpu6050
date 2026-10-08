@@ -22,10 +22,14 @@
 // ===============================
 
 #define ROS_DOMAIN_ID     10
+
 #define SDA               21
 #define SCL               22
 #define I2C_FRECUENCY_HZ  100000
 #define I2C_ADDRESS       0x68
+
+
+
 #define NODE_NAME "esp32_node"
 #define NODE_NAMESPACE ""
 
@@ -188,6 +192,27 @@ void micro_ros_task(void *arg)
 
     while (1) {
 
+        mpu6050_raw_t raw;
+
+        esp_err_t err = mpu6050_read_raw(&raw);
+
+        if (err == ESP_OK) {
+            printf(
+                "ACC [m/s²]: [%.2f, %.2f, %.2f] | "
+                "GYRO [°/s]: [%.2f, %.2f, %.2f]\n",
+                raw.accel[0] * (9.80665f / 16384.0f),
+                raw.accel[1] * (9.80665f / 16384.0f),
+                raw.accel[2] * (9.80665f / 16384.0f),
+                raw.gyro[0] / 131.0f,
+                raw.gyro[1] / 131.0f,
+                raw.gyro[2] / 131.0f
+            );
+        } else {
+            printf("Error de lectura: %s\n", esp_err_to_name(err));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+
         RCSOFTCHECK(
             rclc_executor_spin_some(
                 &executor,
@@ -222,8 +247,6 @@ void app_main(void)
     uint8_t sensor_id = 0;
 
     ESP_ERROR_CHECK(mpu6050_read_id(&sensor_id));
-
-    printf("MPU6050 WHO_AM_I: 0x%02X\n", (unsigned int)sensor_id);
 
     if (sensor_id != 0x68) {
         printf("Identificacion inesperada. Revisar el sensor.\n");
