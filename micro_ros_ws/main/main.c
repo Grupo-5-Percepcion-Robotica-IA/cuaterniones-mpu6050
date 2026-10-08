@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -36,6 +37,8 @@
 #define TASK_STACK_SIZE 20000
 #define TASK_PRIORITY 5
 
+static float gyro_bias[3] = {0.0f, 0.0f, 0.0f};
+
 
 // ===============================
 // Manejo de errores
@@ -58,6 +61,17 @@
     }                                                            \
 }
 
+static const float accel_bias[3] = {
+    480.04f,
+    40.735f,
+    -1581.94f
+};
+
+static const float accel_sensitivity[3] = {
+    16158.85f,
+    16372.115f,
+    16616.44f
+};
 
 // ===============================
 // Tarea principal de micro-ROS
@@ -191,21 +205,35 @@ void micro_ros_task(void *arg)
     // ===============================
 
     while (1) {
-
         mpu6050_raw_t raw;
 
         esp_err_t err = mpu6050_read_raw(&raw);
 
         if (err == ESP_OK) {
+            float accel[3];
+
+            for (int i = 0; i < 3; i++) {
+                accel[i] = (raw.accel[i] - accel_bias[i])
+                        * (9.80665f / accel_sensitivity[i]);
+            }
+
+            float accel_norm = sqrtf(
+                accel[0] * accel[0] +
+                accel[1] * accel[1] +
+                accel[2] * accel[2]
+            );
+
             printf(
                 "ACC [m/s²]: [%.2f, %.2f, %.2f] | "
+                "Norma: %.2f | "
                 "GYRO [°/s]: [%.2f, %.2f, %.2f]\n",
-                raw.accel[0] * (9.80665f / 16384.0f),
-                raw.accel[1] * (9.80665f / 16384.0f),
-                raw.accel[2] * (9.80665f / 16384.0f),
-                raw.gyro[0] / 131.0f,
-                raw.gyro[1] / 131.0f,
-                raw.gyro[2] / 131.0f
+                accel[0],
+                accel[1],
+                accel[2],
+                accel_norm,
+                (raw.gyro[0] - gyro_bias[0]) / 131.0f,
+                (raw.gyro[1] - gyro_bias[1]) / 131.0f,
+                (raw.gyro[2] - gyro_bias[2]) / 131.0f
             );
         } else {
             printf("Error de lectura: %s\n", esp_err_to_name(err));
@@ -252,6 +280,24 @@ void app_main(void)
         printf("Identificacion inesperada. Revisar el sensor.\n");
         return;
     }
+
+    printf("Calibrando girómetro: no mover el sensor.\n");
+
+    // Tiempo para soltar el módulo y dejarlo quieto.
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    ESP_ERROR_CHECK(
+        mpu6050_calibrate_gyro(500, gyro_bias)
+    );
+
+
+    printf(
+        "Offset crudo del girómetro: [%.2f, %.2f, %.2f]\n",
+        gyro_bias[0],
+        gyro_bias[1],
+        gyro_bias[2]
+    );
+
 
     #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || \
         defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)

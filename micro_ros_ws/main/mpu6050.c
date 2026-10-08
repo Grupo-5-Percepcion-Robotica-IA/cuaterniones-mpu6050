@@ -20,6 +20,7 @@
 static i2c_master_bus_handle_t bus_handle = NULL;
 static i2c_master_dev_handle_t device_handle = NULL;
 
+
 static esp_err_t mpu6050_write_register(uint8_t reg, uint8_t value)
 {
     if (device_handle == NULL) {
@@ -124,8 +125,6 @@ esp_err_t mpu6050_init(const mpu6050_config_t *config)
         goto cleanup;
     }
     
-    
-    
     return ESP_OK;
 
 cleanup:
@@ -199,6 +198,102 @@ esp_err_t mpu6050_read_raw(mpu6050_raw_t *data)
             ((uint16_t)buffer[gyro_index] << 8) |
             buffer[gyro_index + 1]
         );
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t mpu6050_read_ranges(uint8_t *accel_config, uint8_t *gyro_config)
+{
+    if (accel_config == NULL || gyro_config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // GYRO_CONFIG y ACCEL_CONFIG son consecutivos.
+    uint8_t reg = MPU6050_REG_GYRO_CONFIG;
+    uint8_t buffer[2];
+
+    esp_err_t err = i2c_master_transmit_receive(
+        device_handle,
+        &reg,
+        1,
+        buffer,
+        sizeof(buffer),
+        I2C_TIMEOUT_MS
+    );
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    *gyro_config = buffer[0];
+    *accel_config = buffer[1];
+
+    return ESP_OK;
+}
+
+esp_err_t mpu6050_calibrate_gyro(uint32_t samples,float bias[3])
+{
+    if (samples == 0 || bias == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int64_t sum[3] = {0, 0, 0};
+
+    for (uint32_t i = 0; i < samples; i++) {
+        mpu6050_raw_t raw;
+
+        esp_err_t err = mpu6050_read_raw(&raw);
+
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        for (int axis = 0; axis < 3; axis++) {
+            sum[axis] += raw.gyro[axis];
+        }
+
+        // Lectura lenta para calibración, no para el filtro.
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    for (int axis = 0; axis < 3; axis++) {
+        bias[axis] = (float)sum[axis] / (float)samples;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t mpu6050_average_accel(uint32_t samples, float average[3])
+{
+    if (samples == 0 || average == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int64_t sum[3] = {0, 0, 0};
+
+    for (uint32_t i = 0; i < samples; i++) {
+        mpu6050_raw_t raw;
+
+        esp_err_t err = mpu6050_read_raw(&raw);
+
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        for (int axis = 0; axis < 3; axis++) {
+            sum[axis] += raw.accel[axis];
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    for (int axis = 0; axis < 3; axis++) {
+        average[axis] = (float)sum[axis] / (float)samples;
     }
 
     return ESP_OK;
