@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "mpu6050.c"
 
     INCLUDE_DIRS
         "."
@@ -14,6 +15,7 @@ idf_component_register(
 
     PRIV_REQUIRES
         esp_timer
+        esp_driver_i2c
 )
 
 target_link_libraries(${COMPONENT_LIB} PRIVATE m)

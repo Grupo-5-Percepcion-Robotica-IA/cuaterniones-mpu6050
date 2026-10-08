@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,6 +11,9 @@
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 
+#include "esp_err.h"
+#include "mpu6050.h"
+
 #include <rmw_microros/rmw_microros.h>
 
 
@@ -17,8 +21,11 @@
 // Configuracion general
 // ===============================
 
-#define ROS_DOMAIN_ID 10
-
+#define ROS_DOMAIN_ID     10
+#define SDA               21
+#define SCL               22
+#define I2C_FRECUENCY_HZ  100000
+#define I2C_ADDRESS       0x68
 #define NODE_NAME "esp32_node"
 #define NODE_NAMESPACE ""
 
@@ -144,17 +151,6 @@ void micro_ros_task(void *arg)
 
 
     // ===============================
-    // Publishers
-    // Subscribers
-    // Timers
-    // Services
-    //
-    // Agregar aca lo necesario
-    // para cada trabajo practico.
-    // ===============================
-
-
-    // ===============================
     // Executor
     // ===============================
 
@@ -211,12 +207,36 @@ void micro_ros_task(void *arg)
 void app_main(void)
 {
 
-#if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || \
-    defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
+    printf("\n=== PRUEBA MPU6050 VERSION 1 ===\n");
+    fflush(stdout);
 
-    uros_network_interface_initialize();
+    mpu6050_config_t imu_config = {
+        .sda_gpio = SDA,
+        .scl_gpio = SCL,
+        .i2c_frequency_hz = I2C_FRECUENCY_HZ,
+        .address = I2C_ADDRESS,
+    };
 
-#endif
+    ESP_ERROR_CHECK(mpu6050_init(&imu_config));
+
+    uint8_t sensor_id = 0;
+
+    ESP_ERROR_CHECK(mpu6050_read_id(&sensor_id));
+
+    printf("MPU6050 WHO_AM_I: 0x%02X\n", (unsigned int)sensor_id);
+
+    if (sensor_id != 0x68) {
+        printf("Identificacion inesperada. Revisar el sensor.\n");
+        return;
+    }
+
+    #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || \
+        defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
+
+        uros_network_interface_initialize();
+
+    #endif
+
 
     xTaskCreate(
         micro_ros_task,
