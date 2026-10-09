@@ -4,6 +4,7 @@ idf_component_register(
         "mpu6050.c"
         "quaternion.c"
         "imu_filter.c"
+        "imu_motion.c"
 
     INCLUDE_DIRS
         "."

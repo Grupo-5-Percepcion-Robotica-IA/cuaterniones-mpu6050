@@ -16,9 +16,28 @@
 #include "esp_timer.h"
 #include "quaternion.h"
 #include "imu_filter.h"
+#include "imu_motion.h"
 
 #include <rmw_microros/rmw_microros.h>
 
+#include "freertos/queue.h"
+#include "sensor_msgs/msg/imu.h"
+#include "geometry_msgs/msg/pose_stamped.h"
+#include "rosidl_runtime_c/string_functions.h"
+
+// ===============================
+// Estructuras para publicar
+// ===============================
+
+typedef struct {
+    int64_t time_us;
+    float accel[3];
+    float gyro[3];
+    quaternion_t orientation;
+    float position[3];
+} imu_snapshot_t;
+
+static QueueHandle_t imu_queue;
 
 // ===============================
 // Configuracion general
@@ -104,6 +123,21 @@ static void imu_task(void *arg)
         return;
     }
 
+    //Arrancamos con posición y velocidad -> 0
+    imu_motion_t motion;
+    imu_motion_reset(&motion);
+
+    float linear_bias[3] = {0.0f, 0.0f, 0.0f};
+    double linear_sum[3] = {0.0, 0.0, 0.0};
+
+    float accel_corrected[3] = {0.0f, 0.0f, 0.0f};
+
+    uint32_t linear_samples = 0;
+    int linear_calibrated = 0;
+    int64_t linear_start_us = 0;
+
+    printf("Calibrando residuo lineal: mantener quieto 5 segundos.\n");
+
     while (1) {
         vTaskDelayUntil(&last_wake, period);
 
@@ -169,6 +203,71 @@ static void imu_task(void *arg)
                 accel_linear[2] = accel_world[2] - 9.80665f;
 
                 world_valid = 1;
+
+
+                if (!linear_calibrated) {
+                    if (linear_start_us == 0) {
+                        linear_start_us = now;
+                    }
+
+                    int64_t elapsed_us = now - linear_start_us;
+
+                    // Primeros 2 segundos: dejar estabilizar el filtro.
+                    if (elapsed_us >= 2000000LL) {
+                        for (int i = 0; i < 3; i++) {
+                            linear_sum[i] += accel_linear[i];
+                        }
+
+                        linear_samples++;
+
+                        // Siguientes 3 segundos: promediar muestras válidas.
+                        if (elapsed_us >= 5000000LL &&
+                            linear_samples >= 500) {
+
+                            for (int i = 0; i < 3; i++) {
+                                linear_bias[i] =
+                                    (float)(linear_sum[i] / linear_samples);
+                            }
+
+                            imu_motion_reset(&motion);
+                            linear_calibrated = 1;
+
+                            printf(
+                                "Residuo lineal [m/s²]: [%.4f, %.4f, %.4f]\n",
+                                linear_bias[0],
+                                linear_bias[1],
+                                linear_bias[2]
+                            );
+
+                            printf("Calibracion lista. Comienza la integracion.\n");
+                        }
+                    }
+                } else {
+                    for (int i = 0; i < 3; i++) {
+                        accel_corrected[i] = accel_linear[i] - linear_bias[i];
+                    }
+
+                    if (imu_motion_update(
+                            &motion,
+                            accel_corrected,
+                            dt
+                        ) != 0) {
+                        printf("Error integrando aceleracion.\n");
+                    }
+
+                    imu_snapshot_t snapshot = {
+                        .time_us = now,
+                        .orientation = filter.orientation
+                    };
+
+                    for (int i = 0; i < 3; i++) {
+                        snapshot.accel[i] = accel[i];
+                        snapshot.gyro[i] = gyro[i];
+                        snapshot.position[i] = motion.position[i];
+                    }
+
+                    xQueueOverwrite(imu_queue, &snapshot);
+                }
             }
 
         }
@@ -194,18 +293,20 @@ static void imu_task(void *arg)
                 //     gyro[0], gyro[1], gyro[2]
                 // );
 
-                if (world_valid) {
+                if (world_valid && linear_calibrated) {
                     printf(
-                        "ACC mundo [m/s²]: [%.3f, %.3f, %.3f]\n"
-                        "ACC lineal [m/s²]: [%.3f, %.3f, %.3f]\n"
-                        "errores I2C: %lu\n",
-                        accel_world[0],
-                        accel_world[1],
-                        accel_world[2],
-                        accel_linear[0],
-                        accel_linear[1],
-                        accel_linear[2],
-                        (unsigned long)errors
+                        "ACC corregida [m/s²]: [%.3f, %.3f, %.3f]\n"
+                        "VEL [m/s]: [%.3f, %.3f, %.3f]\n"
+                        "POS [m]: [%.3f, %.3f, %.3f]\n",
+                        accel_corrected[0],
+                        accel_corrected[1],
+                        accel_corrected[2],
+                        motion.velocity[0],
+                        motion.velocity[1],
+                        motion.velocity[2],
+                        motion.position[0],
+                        motion.position[1],
+                        motion.position[2]
                     );
                 }
 
@@ -312,6 +413,61 @@ void micro_ros_task(void *arg)
         )
     );
 
+    // ===============================
+    // Publicadores
+    // ===============================
+    rcl_publisher_t imu_publisher = rcl_get_zero_initialized_publisher();
+
+    rcl_publisher_t pose_publisher = rcl_get_zero_initialized_publisher();
+
+    RCCHECK(rclc_publisher_init_best_effort(
+        &imu_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
+        "/imu_data_rcv"
+    ));
+
+    RCCHECK(rclc_publisher_init_best_effort(
+        &pose_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
+        "/imu_pose"
+    ));
+
+    sensor_msgs__msg__Imu imu_msg = {0};
+    geometry_msgs__msg__PoseStamped pose_msg = {0};
+
+    if (!sensor_msgs__msg__Imu__init(&imu_msg) ||
+        !geometry_msgs__msg__PoseStamped__init(&pose_msg)) {
+        printf("Error inicializando mensajes.\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (!rosidl_runtime_c__String__assign(
+            &imu_msg.header.frame_id, "imu_link") ||
+        !rosidl_runtime_c__String__assign(
+            &pose_msg.header.frame_id, "world")) {
+        printf("Error asignando frames.\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Este tópico no contiene una estimación de orientación.
+    imu_msg.orientation.w = 1.0;
+    imu_msg.orientation_covariance[0] = -1.0;
+
+    // Sincronizar reloj con el Agent.
+    if (rmw_uros_sync_session(1000) != RCL_RET_OK) {
+        printf("Error sincronizando reloj con el Agent.\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Convertir tiempos monotónicos de adquisición a tiempo ROS.
+    int64_t epoch_offset_ns =
+        rmw_uros_epoch_nanos() - esp_timer_get_time() * 1000LL;
+
 
     // ===============================
     // Executor
@@ -349,15 +505,49 @@ void micro_ros_task(void *arg)
     // Loop principal
     // ===============================
 
-    while (1) {
-        RCSOFTCHECK(
-            rclc_executor_spin_some(
-                &executor,
-                RCL_MS_TO_NS(10)
-            )
-        );
+    TickType_t publish_wake = xTaskGetTickCount();
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+    while (1) {
+        vTaskDelayUntil(&publish_wake, pdMS_TO_TICKS(20));
+
+        imu_snapshot_t snapshot;
+
+        if (xQueueReceive(imu_queue, &snapshot, 0) != pdTRUE) {
+            continue;
+        }
+
+        int64_t stamp_ns =
+            epoch_offset_ns + snapshot.time_us * 1000LL;
+
+        imu_msg.header.stamp.sec =
+            (int32_t)(stamp_ns / 1000000000LL);
+
+        imu_msg.header.stamp.nanosec =
+            (uint32_t)(stamp_ns % 1000000000LL);
+
+        pose_msg.header.stamp = imu_msg.header.stamp;
+
+        // Datos expresados en los ejes del sensor.
+        imu_msg.linear_acceleration.x = snapshot.accel[0];
+        imu_msg.linear_acceleration.y = snapshot.accel[1];
+        imu_msg.linear_acceleration.z = snapshot.accel[2];
+
+        imu_msg.angular_velocity.x = snapshot.gyro[0];
+        imu_msg.angular_velocity.y = snapshot.gyro[1];
+        imu_msg.angular_velocity.z = snapshot.gyro[2];
+
+        // Pose expresada en los ejes del mundo.
+        pose_msg.pose.position.x = 0.0;
+        pose_msg.pose.position.y = 0.0;
+        pose_msg.pose.position.z = 0.0;
+
+        pose_msg.pose.orientation.w = snapshot.orientation.w;
+        pose_msg.pose.orientation.x = snapshot.orientation.x;
+        pose_msg.pose.orientation.y = snapshot.orientation.y;
+        pose_msg.pose.orientation.z = snapshot.orientation.z;
+
+        RCSOFTCHECK(rcl_publish(&imu_publisher, &imu_msg, NULL));
+        RCSOFTCHECK(rcl_publish(&pose_publisher, &pose_msg, NULL));
     }
 }
 
@@ -411,6 +601,13 @@ void app_main(void)
     
     #endif
     
+    imu_queue = xQueueCreate(1, sizeof(imu_snapshot_t));
+
+    if (imu_queue == NULL) {
+        printf("Error creando la cola IMU.\n");
+        return;
+    }
+
     BaseType_t imu_result = xTaskCreate(
         imu_task,
         "imu_task",
