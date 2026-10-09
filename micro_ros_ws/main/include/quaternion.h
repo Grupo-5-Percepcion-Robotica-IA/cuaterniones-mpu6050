@@ -20,4 +20,7 @@ int quaternion_normalize(quaternion_t *q);
 
 int quaternion_integrate_gyro(quaternion_t *q, const float gyro[3], float dt);
 
+// q debe ser unitario y representar la rotación sensor -> mundo.
+int quaternion_rotate_vector(quaternion_t q, const float vector[3], float result[3]);
+
 #endif

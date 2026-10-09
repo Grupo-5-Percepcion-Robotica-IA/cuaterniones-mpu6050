@@ -93,3 +93,36 @@ int quaternion_integrate_gyro(quaternion_t *q, const float gyro[3], float dt)
     *q = next;
     return 0;
 }
+
+int quaternion_rotate_vector(quaternion_t q, const float vector[3], float result[3])
+{
+    if (vector == NULL || result == NULL) {
+        return -1;
+    }
+
+    // Normalizar una copia para asegurar una rotación válida.
+    if (quaternion_normalize(&q) != 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < 3; i++) {
+        if (!isfinite(vector[i])) {
+            return -1;
+        }
+    }
+
+    quaternion_t v = {
+        .w = 0.0f,
+        .x = vector[0],
+        .y = vector[1],
+        .z = vector[2],
+    };
+
+    quaternion_t rotated = quaternion_multiply(quaternion_multiply(q, v), quaternion_conjugate(q));
+
+    result[0] = rotated.x;
+    result[1] = rotated.y;
+    result[2] = rotated.z;
+
+    return 0;
+}

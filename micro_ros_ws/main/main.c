@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <unistd.h>
 #include <stdint.h>
 #include <math.h>
 
@@ -16,6 +15,7 @@
 #include "mpu6050.h"
 #include "esp_timer.h"
 #include "quaternion.h"
+#include "imu_filter.h"
 
 #include <rmw_microros/rmw_microros.h>
 
@@ -30,7 +30,7 @@
 #define SCL               22
 #define I2C_FRECUENCY_HZ  100000
 #define I2C_ADDRESS       0x68
-
+#define ALPHA             0.98f 
 
 
 #define NODE_NAME "esp32_node"
@@ -96,12 +96,13 @@ static void imu_task(void *arg)
     int64_t min_dt = INT64_MAX;
     int64_t max_dt = 0;
 
-    quaternion_t orientation = {
-        .w = 1.0f,
-        .x = 0.0f,
-        .y = 0.0f,
-        .z = 0.0f
-    };
+    imu_filter_t filter;
+
+    if (imu_filter_init(&filter, ALPHA) != 0) {
+        printf("Error inicializando el filtro.\n");
+        vTaskDelete(NULL);
+        return;
+    }
 
     while (1) {
         vTaskDelayUntil(&last_wake, period);
@@ -137,6 +138,10 @@ static void imu_task(void *arg)
 
         float accel[3];
         float gyro[3];
+        float accel_world[3];
+        float accel_linear[3];
+        
+        int world_valid = 0;
 
         if (err == ESP_OK) {
             for (int i = 0; i < 3; i++) {
@@ -149,49 +154,68 @@ static void imu_task(void *arg)
 
             float dt = (float)dt_us * 1e-6f;
 
-            if (quaternion_integrate_gyro(
-                    &orientation, gyro, dt) != 0) {
-                printf("Error actualizando el cuaternion.\n");
+            if (imu_filter_update(&filter, accel, gyro, dt) != 0) {
+                printf("Error actualizando el filtro.\n");
+            } else if (quaternion_rotate_vector(
+                        filter.orientation,
+                        accel,
+                        accel_world) != 0) {
+                printf("Error rotando la aceleracion.\n");
+            } else {
+                // Mundo con Z hacia arriba:
+                // en reposo, la lectura rotada es aproximadamente [0, 0, +g].
+                accel_linear[0] = accel_world[0];
+                accel_linear[1] = accel_world[1];
+                accel_linear[2] = accel_world[2] - 9.80665f;
+
+                world_valid = 1;
             }
+
         }
 
         intervals++;
 
         if (intervals >= 200) {
-            printf(
-                "IMU: dt promedio=%.1f us | "
-                "min=%lld | max=%lld | errores=%lu\n",
-                (double)total_dt / intervals,
-                (long long)min_dt,
-                (long long)max_dt,
-                (unsigned long)errors
-            );
+            // printf(
+            //     "IMU: dt promedio=%.1f us | "
+            //     "min=%lld | max=%lld | errores=%lu\n",
+            //     (double)total_dt / intervals,
+            //     (long long)min_dt,
+            //     (long long)max_dt,
+            //     (unsigned long)errors
+            // );
 
             if (err == ESP_OK) {
 
-                for (int i = 0; i < 3; i++) {
-                    accel[i] = (raw.accel[i] - accel_bias[i])
-                             * (9.80665f / accel_sensitivity[i]);
+                // printf(
+                //     "ACC [m/s²]: [%.2f, %.2f, %.2f] | "
+                //     "GYRO [rad/s]: [%.4f, %.4f, %.4f]\n",
+                //     accel[0], accel[1], accel[2],
+                //     gyro[0], gyro[1], gyro[2]
+                // );
 
-                    // Cuentas -> grados/s -> radianes/s.
-                    gyro[i] = (raw.gyro[i] - gyro_bias[i])
-                            * (0.01745329252f / 131.0f);
+                if (world_valid) {
+                    printf(
+                        "ACC mundo [m/s²]: [%.3f, %.3f, %.3f]\n"
+                        "ACC lineal [m/s²]: [%.3f, %.3f, %.3f]\n"
+                        "errores I2C: %lu\n",
+                        accel_world[0],
+                        accel_world[1],
+                        accel_world[2],
+                        accel_linear[0],
+                        accel_linear[1],
+                        accel_linear[2],
+                        (unsigned long)errors
+                    );
                 }
 
-                printf(
-                    "ACC [m/s²]: [%.2f, %.2f, %.2f] | "
-                    "GYRO [rad/s]: [%.4f, %.4f, %.4f]\n",
-                    accel[0], accel[1], accel[2],
-                    gyro[0], gyro[1], gyro[2]
-                );
-
-                printf(
-                    "q gyro: [%.4f, %.4f, %.4f, %.4f]\n",
-                    orientation.w,
-                    orientation.x,
-                    orientation.y,
-                    orientation.z
-                );
+                // printf(
+                //     "q filtrado: [%.4f, %.4f, %.4f, %.4f]\n",
+                //     filter.orientation.w,
+                //     filter.orientation.x,
+                //     filter.orientation.y,
+                //     filter.orientation.z
+                // );
             }
 
             intervals = 0;
@@ -251,13 +275,6 @@ void micro_ros_task(void *arg)
     );
 
 
-    // Esperar hasta que el Agent este disponible
-    printf(
-        "Buscando micro-ROS Agent en %s:%s...\n",
-        CONFIG_MICRO_ROS_AGENT_IP,
-        CONFIG_MICRO_ROS_AGENT_PORT
-    );
-
     while (
         rmw_uros_ping_agent_options(
             1000,
@@ -265,11 +282,8 @@ void micro_ros_task(void *arg)
             rmw_options
         ) != RCL_RET_OK
     ) {
-        printf("Agent no disponible. Reintentando...\n");
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-
-    printf("Agent encontrado.\n");
-
 
     // Inicializar soporte de ROS 2
     RCCHECK(
@@ -354,9 +368,6 @@ void micro_ros_task(void *arg)
 
 void app_main(void)
 {
-    printf("\n=== PRUEBA MPU6050 VERSION 1 ===\n");
-    fflush(stdout);
-
     mpu6050_config_t imu_config = {
         .sda_gpio = SDA,
         .scl_gpio = SCL,
@@ -385,13 +396,21 @@ void app_main(void)
     );
 
 
-    printf(
-        "Offset crudo del girómetro: [%.2f, %.2f, %.2f]\n",
-        gyro_bias[0],
-        gyro_bias[1],
-        gyro_bias[2]
-    );
+    // printf(
+    //     "Offset crudo del girómetro: [%.2f, %.2f, %.2f]\n",
+    //     gyro_bias[0],
+    //     gyro_bias[1],
+    //     gyro_bias[2]
+    // );
 
+    
+    #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || \
+    defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
+    
+    uros_network_interface_initialize();
+    
+    #endif
+    
     BaseType_t imu_result = xTaskCreate(
         imu_task,
         "imu_task",
@@ -405,43 +424,6 @@ void app_main(void)
         printf("No se pudo crear imu_task.\n");
         return;
     }
-
-
-    quaternion_t q_test = {
-        .w = 2.0f,
-        .x = 0.0f,
-        .y = 0.0f,
-        .z = 2.0f
-    };
-
-    if (quaternion_normalize(&q_test) != 0) {
-        printf("Error normalizando el cuaternion.\n");
-        return;
-    }
-
-    quaternion_t identity = quaternion_multiply(
-        q_test,
-        quaternion_conjugate(q_test)
-    );
-
-    printf(
-        "q normalizado: [%.4f, %.4f, %.4f, %.4f]\n",
-        q_test.w, q_test.x, q_test.y, q_test.z
-    );
-
-    printf(
-        "q * conjugado(q): [%.4f, %.4f, %.4f, %.4f]\n",
-        identity.w, identity.x, identity.y, identity.z
-    );
-
-
-    #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || \
-        defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
-
-        uros_network_interface_initialize();
-
-    #endif
-
 
     xTaskCreate(
         micro_ros_task,
