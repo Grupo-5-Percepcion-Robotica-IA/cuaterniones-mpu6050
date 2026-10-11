@@ -26,10 +26,9 @@ rcl_subscription_t subscriber;
 std_msgs__msg__Int32 send_msg;
 std_msgs__msg__Int32 recv_msg;
 
-void timer_callback(rcl_timer_t * timer, int64_t last_call_time, uintptr_t arg)
+void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 {
 	(void) last_call_time;
-	(void) arg;
 	if (timer != NULL) {
 		RCSOFTCHECK(rcl_publish(&publisher, &send_msg, NULL));
 		printf("Sent: %d\n",  (int)  send_msg.data);

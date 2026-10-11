@@ -26,3 +26,4 @@ esp_err_t mpu6050_read_ranges(uint8_t *accel_config, uint8_t *gyro_config);
 esp_err_t mpu6050_calibrate_gyro(uint32_t samples,float bias[3]);
 
 #endif
+

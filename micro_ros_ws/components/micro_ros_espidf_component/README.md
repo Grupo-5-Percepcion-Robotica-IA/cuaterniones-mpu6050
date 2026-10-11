@@ -7,7 +7,7 @@
 
 # micro-ROS component for ESP-IDF
 
-This component has been tested in ESP-IDF v5.4, v5.5, and v6.0 with ESP32, ESP32-S2, ESP32-S3, ESP32-C3 and ESP32-C6.
+This component has been tested in ESP-IDF v5.2, v5.3, v5.4, v5.5, and v6.0 with ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4.
 
 ## Dependencies
 
@@ -43,22 +43,22 @@ To align with the semantic versioning scheme of the ESP Component Registry, the 
 
 Rolling is published as a prerelease of the next version, for example `27.0.0-rolling.20260806`.
 
-This branch corresponds to rolling and publishes `27.0.0-rolling.YYYYMMDD` versions.
+This branch corresponds to jazzy and publishes `24.x.y` versions.
 
 Add the component to your project with the IDF Component Manager:
 
 ```bash
-idf.py add-dependency "micro-ros/micro_ros_espidf_component>=27.0.0-rolling.0"
+idf.py add-dependency "micro-ros/micro_ros_espidf_component^24"
 ```
 
 Or declare it in your main component's `idf_component.yml`:
 
 ```yaml
 dependencies:
-  micro-ros/micro_ros_espidf_component: ">=27.0.0-rolling.0"
+  micro-ros/micro_ros_espidf_component: "^24"
 ```
 
-Then build your project as usual. The Component Manager downloads the latest matching rolling prerelease.
+Then build your project as usual. The Component Manager downloads the matching `24.x.y` release for Jazzy.
 
 ### From this repository
 
@@ -66,7 +66,7 @@ You can also clone this repo into the `components` folder of your project:
 
 ```bash
 cd your_project/components
-git clone -b rolling https://github.com/micro-ROS/micro_ros_espidf_component.git
+git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git
 ```
 
 If you encounter issues during the build process, ensure that you are running in a clean shell environment _without_ the ROS 2 setup script sourced.
@@ -78,7 +78,7 @@ In order to test a int32_publisher example:
 ```bash
 . $IDF_PATH/export.sh
 cd examples/int32_publisher
-# Set target board [esp32|esp32s2|esp32s3|esp32c3|esp32c6]
+# Set target board [esp32|esp32s2|esp32s3|esp32c3|esp32c6|esp32p4]
 idf.py set-target esp32
 idf.py menuconfig
 # Set your micro-ROS configuration and WiFi credentials under micro-ROS Settings
@@ -97,7 +97,7 @@ Is possible to use a micro-ROS Agent just with this docker command:
 
 ```bash
 # UDPv4 micro-ROS Agent
-docker run -it --rm --net=host microros/micro-ros-agent:rolling udp4 --port 8888 -v6
+docker run -it --rm --net=host microros/micro-ros-agent:jazzy udp4 --port 8888 -v6
 ```
 
 ## Build with docker container
@@ -107,7 +107,7 @@ It's possible to build this example application using the official Espressif [do
 ```bash
 docker run --name micro-ros-espidf-component -it espressif/idf:release-v6.0 bash
 
-git clone -b rolling https://github.com/micro-ROS/micro_ros_espidf_component.git
+git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git
 cd micro_ros_espidf_component/
 
 # Install dependencies
@@ -147,7 +147,7 @@ Is possible to use a micro-ROS Agent just with this docker command:
 
 ```bash
 # Serial micro-ROS Agent
-docker run -it --rm -v /dev:/dev --privileged --net=host microros/micro-ros-agent:rolling serial --dev [YOUR BOARD PORT] -v6
+docker run -it --rm -v /dev:/dev --privileged --net=host microros/micro-ros-agent:jazzy serial --dev [YOUR BOARD PORT] -v6
 ```
 
 ## Purpose of the Project

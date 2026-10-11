@@ -2,8 +2,9 @@
 Changelog for package micro_ros_espidf
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-6.0.0 (2024-06-03)
+5.0.1 (2024-06-03)
 ------------------
+* Bump jazzy (`#246 <https://github.com/micro-ROS/micro_ros_espidf_component/issues/246>`_)
 * Add multithread to CI (`#238 <https://github.com/micro-ROS/micro_ros_espidf_component/issues/238>`_)
   * Add multithread to CI
   * Fix multithread example

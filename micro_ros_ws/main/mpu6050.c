@@ -1,4 +1,5 @@
 #include "mpu6050.h"
+#include "mpu6050_bus.h"
 #include "driver/i2c_master.h"
 
 #include "freertos/FreeRTOS.h"
@@ -297,4 +298,56 @@ esp_err_t mpu6050_average_accel(uint32_t samples, float average[3])
     }
 
     return ESP_OK;
+}
+
+
+// ---------------------------------------------------------------------
+// Agregado para el DMP: leer / escribir varios bytes seguidos.
+// ---------------------------------------------------------------------
+
+esp_err_t mpu6050_read_bytes(uint8_t reg, uint8_t *data, size_t len)
+{
+    if (data == NULL || len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return i2c_master_transmit_receive(
+        device_handle,
+        &reg,
+        1,
+        data,
+        len,
+        I2C_TIMEOUT_MS
+    );
+}
+
+esp_err_t mpu6050_write_bytes(uint8_t reg, const uint8_t *data, size_t len)
+{
+    // Se escribe en bloques de hasta 32 bytes (el DMP usa 16).
+    uint8_t buffer[1 + 32];
+
+    if (data == NULL || len == 0 || len > sizeof(buffer) - 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    buffer[0] = reg;
+
+    for (size_t i = 0; i < len; i++) {
+        buffer[1 + i] = data[i];
+    }
+
+    return i2c_master_transmit(
+        device_handle,
+        buffer,
+        1 + len,
+        I2C_TIMEOUT_MS
+    );
 }

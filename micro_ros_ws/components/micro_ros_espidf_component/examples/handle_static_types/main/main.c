@@ -32,10 +32,9 @@ sensor_msgs__msg__Image msg_static;
 
 uint8_t my_buffer[1000];
 
-void timer_callback(rcl_timer_t * timer, int64_t last_call_time, uintptr_t arg)
+void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 {
 	RCLC_UNUSED(last_call_time);
-	RCLC_UNUSED(arg);
 	if (timer != NULL) {
 		RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
 		RCSOFTCHECK(rcl_publish(&publisher, &msg_static, NULL));

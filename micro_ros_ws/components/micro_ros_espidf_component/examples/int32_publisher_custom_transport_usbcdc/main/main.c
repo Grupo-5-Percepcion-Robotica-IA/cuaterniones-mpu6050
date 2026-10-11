@@ -51,9 +51,8 @@ rcl_publisher_t publisher; // Publisher
 std_msgs__msg__Int32 msg; // Message to be published
 
 // Timer callback. Publishes a message
-void timer_callback(rcl_timer_t *timer, int64_t last_call_time, uintptr_t arg) {
+void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
 	RCLC_UNUSED(last_call_time);
-	RCLC_UNUSED(arg);
 	if (timer != NULL) {
 		// Publish message to topic
 		RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));

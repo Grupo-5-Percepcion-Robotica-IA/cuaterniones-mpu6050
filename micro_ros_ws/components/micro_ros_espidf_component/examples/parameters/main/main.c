@@ -23,11 +23,10 @@
 
 rclc_parameter_server_t param_server;
 
-void timer_callback(rcl_timer_t * timer, int64_t last_call_time, uintptr_t arg)
+void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 {
     (void) timer;
     (void) last_call_time;
-    (void) arg;
 
     int64_t value;
     rclc_parameter_get_int(&param_server, "param2", &value);

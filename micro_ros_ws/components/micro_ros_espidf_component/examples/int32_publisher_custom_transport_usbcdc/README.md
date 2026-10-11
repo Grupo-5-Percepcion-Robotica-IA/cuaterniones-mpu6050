@@ -87,7 +87,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
 Or, using Docker:
 
 ```bash
-docker run -it --rm -v /dev:/dev -v /dev/shm:/dev/shm --privileged --net=host microros/micro-ros-agent:rolling serial --dev /dev/ttyACM0 -v4
+docker run -it --rm -v /dev:/dev -v /dev/shm:/dev/shm --privileged --net=host microros/micro-ros-agent:jazzy serial --dev /dev/ttyACM0 -v4
 ```
 
 Output expected:

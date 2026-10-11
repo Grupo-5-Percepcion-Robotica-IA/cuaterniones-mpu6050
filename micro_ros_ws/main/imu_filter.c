@@ -3,6 +3,14 @@
 #include <math.h>
 #include <stddef.h>
 
+// Compuerta del acelerómetro: si la norma de la aceleración medida se
+// aleja de g más que ACCEL_GATE, el sensor se está moviendo y el
+// acelerómetro no sirve para saber dónde está "abajo".
+// Con 0.2 m/s² se detectan aceleraciones desde ~2 m/s²: la norma casi no
+// cambia con aceleraciones horizontales chicas, así que no atrapa todo.
+#define USE_ACCEL_GATE  1       // 1 = activada, 0 = desactivada (para comparar en el 1.3)
+#define ACCEL_GATE      0.2f    // m/s²
+
 // Construye una orientación cuya vertical coincide
 // con la dirección medida por el acelerómetro.
 static int orientation_from_accel(
@@ -123,6 +131,21 @@ int imu_filter_update(
     if (quaternion_integrate_gyro(&q_gyro, gyro, dt) != 0) {
         return -1;
     }
+
+#if USE_ACCEL_GATE
+    // Si la aceleración medida no es ~g, hay movimiento: se conserva
+    // solo la predicción del giroscopio y no se corrige con el acelerómetro.
+    float accel_norm = sqrtf(
+        accel[0] * accel[0] +
+        accel[1] * accel[1] +
+        accel[2] * accel[2]
+    );
+
+    if (fabsf(accel_norm - 9.80665f) > ACCEL_GATE) {
+        filter->orientation = q_gyro;
+        return 0;
+    }
+#endif
 
     quaternion_t q_acc;
 
