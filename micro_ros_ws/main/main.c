@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <string.h>
+#include "esp_wifi.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -85,7 +86,7 @@ static QueueHandle_t dmp_queue;
 #define DMP_ACCEL_TO_RAW  (16384.0f / MPU6050_DMP_ACCEL_LSB_PER_G)
 
 // Mismo esquema de calibracion que en el 1.1, medido en segundos.
-#define DMP_SETTLE_S      4.0f    // dejar que el DMP converja
+#define DMP_SETTLE_S      20.0f    // dejar que el DMP converja
 #define DMP_BIAS_S        3.0f    // promediar el residuo lineal
 
 // Mismos 100 ms de reposo que en el 1.1, pero contados en paquetes del DMP.
@@ -193,8 +194,7 @@ static int dmp_pipeline_update(
         accel[i] = (pkt->accel[i] * DMP_ACCEL_TO_RAW - accel_bias[i])
                  * (9.80665f / accel_sensitivity[i]);
 
-        gyro[i] = (pkt->gyro[i] - gyro_bias[i])
-                * (0.01745329252f / GYRO_LSB_PER_DPS);
+        gyro[i] = pkt->gyro[i] * (0.01745329252f / GYRO_LSB_PER_DPS);
     }
 
     p->accel_norm = sqrtf(
@@ -353,6 +353,11 @@ static void imu_task(void *arg)
     uint32_t dmp_errors = 0;
 #endif
 
+// Tiempos de procesamiento en microsegundos
+    int64_t t_raw_sum = 0, t_filter_sum = 0, t_dmp_sum = 0;
+    int64_t t_filter_max = 0, t_dmp_max = 0;
+    uint32_t n_raw = 0, n_filter = 0, n_dmp = 0;
+
     printf("Calibrando residuo lineal: mantener quieto 5 segundos.\n");
 
     while (1) {
@@ -361,7 +366,10 @@ static void imu_task(void *arg)
         int64_t now = esp_timer_get_time();
         mpu6050_raw_t raw;
 
+        int64_t t0 = esp_timer_get_time();
         esp_err_t err = mpu6050_read_raw(&raw);
+        t_raw_sum += esp_timer_get_time() - t0;
+        n_raw++;
 
         if (err != ESP_OK) {
             errors++;
@@ -396,7 +404,13 @@ static void imu_task(void *arg)
             mpu6050_dmp_packet_t packet;
             uint8_t consumed = 0;
 
+            int64_t t1 = esp_timer_get_time();
             esp_err_t dmp_err = mpu6050_dmp_read_latest(&packet, &consumed);
+            int64_t t_dmp = esp_timer_get_time() - t1;
+            t_dmp_sum += t_dmp;
+            n_dmp++;
+
+            if (t_dmp > t_dmp_max) t_dmp_max = t_dmp;
 
             if (dmp_err != ESP_OK) {
                 dmp_errors++;
@@ -452,7 +466,14 @@ static void imu_task(void *arg)
 
             float dt = (float)dt_us * 1e-6f;
 
-            if (imu_filter_update(&filter, accel, gyro, dt) != 0) {
+            int64_t t2 = esp_timer_get_time();
+            int filter_ret = imu_filter_update(&filter, accel, gyro, dt);
+            int64_t t_f = esp_timer_get_time() - t2;
+            t_filter_sum += t_f;
+            n_filter++;
+            if (t_f > t_filter_max) t_filter_max = t_f;
+
+            if (filter_ret != 0) {
                 printf("Error actualizando el filtro.\n");
             } else if (quaternion_rotate_vector(
                         filter.orientation,
@@ -583,6 +604,21 @@ static void imu_task(void *arg)
             //     (long long)max_dt,
             //     (unsigned long)errors
             // );
+
+            if (n_raw > 0 && n_filter > 0 && n_dmp > 0) {
+                printf(
+                    "TIEMPOS [us] | lectura cruda: %.0f | "
+                    "filtro 1.1: %.1f (max %lld) | "
+                    "lectura DMP: %.0f (max %lld)\n",
+                    (double)t_raw_sum / n_raw,
+                    (double)t_filter_sum / n_filter, (long long)t_filter_max,
+                    (double)t_dmp_sum / n_dmp, (long long)t_dmp_max
+                );
+            }
+
+            t_raw_sum = t_filter_sum = t_dmp_sum = 0;
+            t_filter_max = t_dmp_max = 0;
+            n_raw = n_filter = n_dmp = 0;
 
             if (err == ESP_OK) {
 
@@ -1002,6 +1038,7 @@ void app_main(void)
     defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
     
     uros_network_interface_initialize();
+    esp_wifi_set_ps(WIFI_PS_NONE);
     
     #endif
     
