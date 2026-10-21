@@ -29,7 +29,8 @@
 // ===============================
 typedef struct {
     int64_t time_us;
-    quaternion_t orientation;
+    quaternion_t orientation_with_filter;
+    quaternion_t orientation_without_filter;
 } attitude_sample_t;
 
 static QueueHandle_t attitude_queue;
@@ -115,14 +116,14 @@ static void imu_task(void *arg)
         return;
     }
 
-    quaternion_t gyro_orientation = {
+    quaternion_t orientation_without_filter = {
         .w = 1.0f,
         .x = 0.0f,
         .y = 0.0f,
         .z = 0.0f
     };
 
-    int gyro_initialized = 0;
+    int without_filter_initialized = 0;
 
     while (1) {
         vTaskDelayUntil(&last_wake, period);
@@ -176,20 +177,21 @@ static void imu_task(void *arg)
             } else {
                 attitude_valid = 1;
                 
-                if (!gyro_initialized) {
+                if (!without_filter_initialized) {
                     // Ambas estimaciones arrancan con la misma inclinación.
-                    gyro_orientation = filter.orientation;
-                    gyro_initialized = 1;
+                    orientation_without_filter = filter.orientation;
+                    without_filter_initialized = 1;
                 } else {
                     if (quaternion_integrate_gyro(
-                            &gyro_orientation, gyro, dt) != 0) {
+                            &orientation_without_filter, gyro, dt) != 0) {
                         printf("Error integrando actitud del girómetro.\n");
                     }
                 }
-
+                
                 attitude_sample_t sample = {
                     .time_us = now,
-                    .orientation = filter.orientation
+                    .orientation_with_filter = filter.orientation,
+                    .orientation_without_filter = orientation_without_filter
                 };
 
                 xQueueOverwrite(attitude_queue, &sample);
@@ -214,10 +216,10 @@ static void imu_task(void *arg)
                     );
                     printf(
                         "q sin filtro [w,x,y,z]: [%.4f, %.4f, %.4f, %.4f]\n",
-                        gyro_orientation.w,
-                        gyro_orientation.x,
-                        gyro_orientation.y,
-                        gyro_orientation.z
+                        orientation_without_filter.w,
+                        orientation_without_filter.x,
+                        orientation_without_filter.y,
+                        orientation_without_filter.z
                     );
                 }
 
@@ -318,14 +320,14 @@ void micro_ros_task(void *arg)
     );
 
 
-    rcl_publisher_t publisher = rcl_get_zero_initialized_publisher();
+    rcl_publisher_t with_filter_publisher = rcl_get_zero_initialized_publisher();
 
     rcl_ret_t pub_rc = rclc_publisher_init_best_effort(
-        &publisher,
+        &with_filter_publisher,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(
             geometry_msgs, msg, PoseStamped),
-        "/imu_pose"
+        "/imu_pose_with_filter"
     );
 
     if (pub_rc != RCL_RET_OK) {
@@ -341,6 +343,16 @@ void micro_ros_task(void *arg)
     }
 
     printf("Publisher creado.\n");
+
+    rcl_publisher_t without_filter_publisher = rcl_get_zero_initialized_publisher();
+
+    RCCHECK(rclc_publisher_init_best_effort(
+        &without_filter_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(
+            geometry_msgs, msg, PoseStamped),
+            "/imu_pose_without_filter"
+        ));
 
     geometry_msgs__msg__PoseStamped msg = {0};
 
@@ -367,7 +379,11 @@ void micro_ros_task(void *arg)
         rmw_uros_epoch_nanos() -
         esp_timer_get_time() * 1000LL;
 
-    printf("Publicando actitud en /imu_pose.\n");
+    printf(
+        "Publicando actitud:\n"
+        "  Con filtro: /imu_pose_with_filter\n"
+        "  Sin filtro complementario: /imu_pose_without_filter\n"
+    );
 
     TickType_t publish_wake = xTaskGetTickCount();
 
@@ -392,12 +408,20 @@ void micro_ros_task(void *arg)
         msg.header.stamp.nanosec =
             (uint32_t)(stamp_ns % 1000000000LL);
 
-        msg.pose.orientation.w = sample.orientation.w;
-        msg.pose.orientation.x = sample.orientation.x;
-        msg.pose.orientation.y = sample.orientation.y;
-        msg.pose.orientation.z = sample.orientation.z;
+        msg.pose.orientation.w = sample.orientation_with_filter.w;
+        msg.pose.orientation.x = sample.orientation_with_filter.x;
+        msg.pose.orientation.y = sample.orientation_with_filter.y;
+        msg.pose.orientation.z = sample.orientation_with_filter.z;
 
-        RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
+        RCSOFTCHECK(rcl_publish(&with_filter_publisher, &msg, NULL));
+        
+
+        msg.pose.orientation.w = sample.orientation_without_filter.w;
+        msg.pose.orientation.x = sample.orientation_without_filter.x;
+        msg.pose.orientation.y = sample.orientation_without_filter.y;
+        msg.pose.orientation.z = sample.orientation_without_filter.z;
+
+        RCSOFTCHECK(rcl_publish(&without_filter_publisher, &msg, NULL));
     }
 }
 
