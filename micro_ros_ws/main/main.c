@@ -19,6 +19,7 @@
 #include "esp_timer.h"
 #include "quaternion.h"
 #include "imu_filter.h"
+#include "mpu6050_dmp.h"
 
 
 #include <rmw_microros/rmw_microros.h>
@@ -114,6 +115,15 @@ static void imu_task(void *arg)
         return;
     }
 
+    quaternion_t gyro_orientation = {
+        .w = 1.0f,
+        .x = 0.0f,
+        .y = 0.0f,
+        .z = 0.0f
+    };
+
+    int gyro_initialized = 0;
+
     while (1) {
         vTaskDelayUntil(&last_wake, period);
 
@@ -156,7 +166,7 @@ static void imu_task(void *arg)
                         * (9.80665f / accel_sensitivity[i]);
 
                 gyro[i] = (raw.gyro[i] - gyro_bias[i])
-                        * (0.01745329252f / 131.0f);
+                        * (0.01745329252f / MPU6050_DMP_GYRO_LSB_PER_DPS);
             }
 
             float dt = (float)dt_us * 1e-6f;
@@ -165,6 +175,17 @@ static void imu_task(void *arg)
                 printf("Error actualizando el filtro.\n");
             } else {
                 attitude_valid = 1;
+                
+                if (!gyro_initialized) {
+                    // Ambas estimaciones arrancan con la misma inclinación.
+                    gyro_orientation = filter.orientation;
+                    gyro_initialized = 1;
+                } else {
+                    if (quaternion_integrate_gyro(
+                            &gyro_orientation, gyro, dt) != 0) {
+                        printf("Error integrando actitud del girómetro.\n");
+                    }
+                }
 
                 attitude_sample_t sample = {
                     .time_us = now,
@@ -185,13 +206,18 @@ static void imu_task(void *arg)
 
                 if (attitude_valid) {
                     printf(
-                        "q filtrado [w,x,y,z]: [%.4f, %.4f, %.4f, %.4f]\n"
-                        "errores I2C: %lu\n",
+                        "q filtrado [w,x,y,z]: [%.4f, %.4f, %.4f, %.4f]\n",
                         filter.orientation.w,
                         filter.orientation.x,
                         filter.orientation.y,
-                        filter.orientation.z,
-                        (unsigned long)errors
+                        filter.orientation.z
+                    );
+                    printf(
+                        "q sin filtro [w,x,y,z]: [%.4f, %.4f, %.4f, %.4f]\n",
+                        gyro_orientation.w,
+                        gyro_orientation.x,
+                        gyro_orientation.y,
+                        gyro_orientation.z
                     );
                 }
 
@@ -399,6 +425,12 @@ void app_main(void)
         printf("Identificacion inesperada. Revisar el sensor.\n");
         return;
     }
+
+    printf("Cargando firmware del DMP...\n");
+
+    ESP_ERROR_CHECK(mpu6050_dmp_init());
+
+    printf("DMP cargado y verificado; todavía apagado.\n");
 
     printf("Calibrando girómetro: no mover el sensor.\n");
 
