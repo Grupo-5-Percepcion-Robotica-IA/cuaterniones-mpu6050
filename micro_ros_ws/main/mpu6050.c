@@ -1,6 +1,7 @@
+#include <string.h>
 #include "mpu6050.h"
+#include "mpu6050_bus.h"
 #include "driver/i2c_master.h"
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -19,6 +20,50 @@
 // Privados del módulo: main.c no necesita conocerlos.
 static i2c_master_bus_handle_t bus_handle = NULL;
 static i2c_master_dev_handle_t device_handle = NULL;
+
+esp_err_t mpu6050_read_bytes(uint8_t reg, uint8_t *data, size_t len)
+{
+    if (data == NULL || len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return i2c_master_transmit_receive(
+        device_handle,
+        &reg,
+        1,
+        data,
+        len,
+        I2C_TIMEOUT_MS
+    );
+}
+
+esp_err_t mpu6050_write_bytes(uint8_t reg, const uint8_t *data, size_t len)
+{
+    // Hasta 256 bytes de datos por escritura.
+    if (data == NULL || len == 0 || len > 256) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t buffer[257];
+
+    buffer[0] = reg;
+    memcpy(&buffer[1], data, len);
+
+    return i2c_master_transmit(
+        device_handle,
+        buffer,
+        len + 1,
+        I2C_TIMEOUT_MS
+    );
+}
 
 
 static esp_err_t mpu6050_write_register(uint8_t reg, uint8_t value)

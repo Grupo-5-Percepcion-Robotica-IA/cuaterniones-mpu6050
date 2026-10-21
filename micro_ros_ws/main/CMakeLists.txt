@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "mpu6050.c"
+        "mpu6050_dmp.c"
         "quaternion.c"
         "imu_filter.c"
 
@@ -17,7 +18,6 @@ idf_component_register(
 
     PRIV_REQUIRES
         esp_timer
-        esp_driver_i2c
 )
 
 target_link_libraries(${COMPONENT_LIB} PRIVATE m)
