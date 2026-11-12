@@ -7,14 +7,14 @@ idf_component_register(
         "imu_filter.c"
 
     INCLUDE_DIRS
-    "."
-    "include"
+        "."
+        "include"
 
     REQUIRES
-    driver
-    esp_adc
-    esp_driver_i2c
-    micro_ros_espidf_component
+        driver
+        esp_adc
+        esp_driver_i2c
+        micro_ros_espidf_component
 
     PRIV_REQUIRES
         esp_timer
